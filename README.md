@@ -5,4 +5,5 @@
 ...
 
 # Запуск из питона.
-- Нужно скомпилировать .so файл: *g++ -shared -o script.so -fPIC main.cpp -std=c++17*
+- Нужно скомпилировать .so файл:
+  **g++ -shared -o script.so -fPIC main.cpp -std=c++17**
