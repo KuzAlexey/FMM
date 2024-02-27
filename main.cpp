@@ -5,218 +5,246 @@
 #include <string>
 #include <cstdio>
 #include <thread>
+#include <complex>
+#include <map>
+
+
 using namespace std;
 
 namespace AlgorithmParams {
+    int p = 30;
     int D = 1;
-    double G = 1;
-    double EPS = 0.0000000000001;
-    double T = 0.1;
-    double theta = 1;
+//    double MIN_X = -(1 << 20);
+//    double MAX_X = (1 << 20);
+//    double MIN_Y = -(1 << 20);
+//    double MAX_Y = (1 << 20);
+    double MIN_X = -(1 << 7);
+    double MAX_X = (1 << 7);
+    double MIN_Y = -(1 << 7);
+    double MAX_Y = (1 << 7);
+    double eps = 1e-10;
 };
 
 struct Point {
-    double M{};
-    double V_X{}, V_Y{}, V_Z{};
-    double F_X{}, F_Y{}, F_Z{};
-    double X{}, Y{}, Z{};
-    Point(double x, double y, double z, double m, double v_x, double v_y, double v_z) {
-        X = x;
-        Y = y;
-        Z = z;
-        M = m;
-        V_X = v_x;
-        V_Y = v_y;
-        V_Z = v_z;
+    complex<double> z, pot;
+    double q;
+
+    double x() {
+        return z.real();
+    }
+    double y() {
+        return z.imag();
     }
 
-    double dist(Point p) const {
-        return sqrt((X - p.X) * (X - p.X) + (Y - p.Y) * (Y - p.Y) + (Z - p.Z) * (Z - p.Z));
+    Point(double x, double y, double q_p) {
+        q = q_p;
+        z = complex<double>(x, y);
     }
-    double dist(double px, double py, double pz) const {
-        return sqrt((X - px) * (X - px) + (Y - py) * (Y - py) + (Z - pz) * (Z - pz));
-    }
-    void AddPowerFromPoint(Point *p) const {
-        double d = dist(*p);
-        if (abs(d) < AlgorithmParams::EPS) {
-            return;
-        }
-        p->F_X -= AlgorithmParams::G * M * p->M * (p->X - X) / pow(d,3);
-        p->F_Y -= AlgorithmParams::G * M * p->M * (p->Y - Y) / pow(d,3);
-        p->F_Z -= AlgorithmParams::G * M * p->M * (p->Z - Z) / pow(d,3);
-    }
-    void UpdatedPointState() {
-        double A_X, A_Y, A_Z;
-        A_X = F_X / M;
-        A_Y = F_Y / M;
-        A_Z = F_Z / M;
-        X = X + V_X * AlgorithmParams::T + A_X * AlgorithmParams::T * AlgorithmParams::T / 2;
-        Y = Y + V_Y * AlgorithmParams::T + A_Y * AlgorithmParams::T * AlgorithmParams::T / 2;
-        Z = Z + V_Z * AlgorithmParams::T + A_Z * AlgorithmParams::T * AlgorithmParams::T / 2;
-        V_X = V_X + AlgorithmParams::T * A_X;
-        V_Y = V_Y + AlgorithmParams::T * A_Y;
-        V_Z = V_Z + AlgorithmParams::T * A_Z;
-    }
+    Point() {
 
+    }
 };
 
 struct Field {
-    Field* child_fields[8] = {};
-    vector<Point> points;
+    vector<Point> field_points;
+    vector<complex<double> > A, B;
+    vector<Field*> child_fields;
+    vector<Field*> neighbours;
+    vector<Field*> interaction_list;
 
-    // field params
-    double X_AVG = 0, Y_AVG = 0, Z_AVG = 0;
-    double M_SUM = 0, M_X_SUM = 0, M_Y_SUM = 0, M_Z_SUM = 0;
-    double size = -1;
+    Point p_c;
+    Point z_0;
+    double Q = 0;
+    double l_x, r_x, l_y, r_y;
 
-    void AddPowerFromField(Point* p) {
-        double P_X = AlgorithmParams::G * p->M * (Multipole_X_1(p));
-        double P_Y = AlgorithmParams::G * p->M * (Multipole_Y_1(p));
-        double P_Z = AlgorithmParams::G * p->M * (Multipole_Z_1(p));
-        p->F_X -= P_X;// + Multipole_X_2(p) + Multipole_X_3(p) + Multipole_X_4(p));
-        p->F_Y -= P_Y;// + Multipole_Y_2(p) + Multipole_Y_3(p) + Multipole_Y_4(p));
-        p->F_Z -= P_Z;// + Multipole_Z_2(p) + Multipole_Z_3(p) + Multipole_Z_4(p));
+    Field() {
 
-        Point pp = *p;
-        pp.F_X = 0; pp.F_Y = 0; pp.F_Z = 0;
-        for (auto ppp: points) {
-            ppp.AddPowerFromPoint(&pp);
+    }
+
+    void init_z_0_Q_A() {
+        Q = 0;
+        double sum_qx = 0, sum_qy = 0;
+        for (auto p: field_points) {
+            sum_qx += p.q * p.x();
+            sum_qy += p.q * p.y();
+            Q += p.q;
         }
-        if (abs(pp.F_X + P_X) > 5) {
-            cerr << pp.F_X << " " << P_X << "???\n";
+        z_0 = Point(sum_qx / Q, sum_qy / Q, 0);
+        A[0] = Q;
+        for (int k = 1; k < AlgorithmParams::p; k++) {
+            A[k] = 0;
+            for (auto & field_point : field_points) {
+                complex<double> zi(field_point.x(), field_point.y());
+                complex<double> z0(z_0.x(), z_0.y());
+                complex<double> zi_z0 = zi - z0;
+                complex<double> zi_z0_k = pow(zi_z0, k);
+                A[k] += -field_point.q / k * zi_z0_k;
+            }
         }
     }
 
-    // X
-    double Multipole_X_1(Point* p) {
-        return M_SUM * (p->X - X_AVG) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 3);
-    }
-    double Multipole_X_2(Point* p) {
-        return (M_X_SUM - M_SUM * X_AVG) * -(-2 * p->X * p->X + 4 * p->X * X_AVG + p->Y * p->Y - 2 * p->Y * Y_AVG + p->Z * p->Z - 2 * p->Z * Z_AVG - 2 * X_AVG * X_AVG + Y_AVG * Y_AVG + Z_AVG * Z_AVG) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 5);
-    }
-    double Multipole_X_3(Point* p) {
-        return (M_Y_SUM - M_SUM * Y_AVG) * (3 * (p->X - X_AVG) * (p->Y - Y_AVG) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 5));
-    }
-    double Multipole_X_4(Point* p) {
-        return (M_Z_SUM - M_SUM * Z_AVG) * (3 * (p->X - X_AVG) * (p->Z - Z_AVG) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 5));
-    }
-
-    // Y
-    double Multipole_Y_1(Point* p) {
-        return M_SUM * (p->Y - Y_AVG) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 3);
-    }
-    double Multipole_Y_2(Point* p) {
-        return (M_X_SUM - M_SUM * X_AVG) * (3 * (p->X - X_AVG) * (p->Y - Y_AVG)) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 5);
-    }
-    double Multipole_Y_3(Point* p) {
-        return (M_Y_SUM - M_SUM * Y_AVG) * -((p->X * p->X - 2 * p->X * X_AVG - 2 * p->Y * p->Y + 4 * p->Y * Y_AVG + p->Z * p->Z - 2 * p->Z * Z_AVG + X_AVG * X_AVG - 2 * Y_AVG * Y_AVG + Z_AVG * Z_AVG))/ pow(p->dist(X_AVG, Y_AVG, Z_AVG), 5);
-    }
-    double Multipole_Y_4(Point* p) {
-        return (M_Z_SUM - M_SUM * Z_AVG) * (3 * (p->Y - Y_AVG) * (p->Z - Z_AVG) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 5));
-    }
-
-    // Z
-    double Multipole_Z_1(Point* p) {
-        return M_SUM * (p->Z - Z_AVG) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 3);
-    }
-    double Multipole_Z_2(Point* p) {
-        return (M_X_SUM - M_SUM * X_AVG) * (3 * (p->X - X_AVG) * (p->Z - Z_AVG)) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 5);
-    }
-    double Multipole_Z_3(Point* p) {
-        return (M_Y_SUM - M_SUM * Y_AVG) * (3 * (p->Y - Y_AVG) * (p->Z - Z_AVG) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 5));
-    }
-    double Multipole_Z_4(Point* p) {
-        return (M_Z_SUM - M_SUM * Z_AVG) * -((p->X * p->X - 2 * p->X * X_AVG + p->Y * p->Y - 2 * p->Y * Y_AVG - 2 * p->Z * p->Z + 4 * p->Z * Z_AVG + X_AVG * X_AVG + Y_AVG * Y_AVG - 2 * Z_AVG * Z_AVG)) / pow(p->dist(X_AVG, Y_AVG, Z_AVG), 5);
-    }
-
-    double get_size() {
-        if (size != -1) {
-            return size;
-        }
-        double min_x = 1e18, max_x = -1e18, min_y = 1e18, max_y = -1e18;
-        for (auto p: points) {
-            min_x = min(min_x, p.X);
-            max_x = max(max_x, p.X);
-            min_y = min(min_y, p.Y);
-            max_y = max(max_y, p.Y);
-        }
-        size = min((max_x - min_x), (max_y - min_y));
-        return size;
+    bool isLast() {
+        return int(r_x - l_x) == 1;
     }
 };
 
-vector<Point> GetOctet(int n, double x_0, double y_0, double z_0, const vector<Point> &points) {
-    vector<Point> octet;
-    for (const auto &p : points) {
-        bool ox{}, oy{}, oz{};
-        ox = p.X > x_0;
-        oy = p.Y > y_0;
-        oz = p.Z > z_0;
-        if (((ox * 4) + (oy * 2) + oz) == n) {
-            octet.push_back(p);
-        }
-    }
-    return octet;
+map<pair<pair<int, int>, pair<int, int> >, Field*> mp;
+
+int C(int n, int k) {
+    if (k == 0 || k == n)
+        return 1;
+    return C(n - 1, k - 1) * n / k;
 }
 
-bool CheckInOctet(int n, double x_0, double y_0, double z_0, Point* p) {
-    bool ox{}, oy{}, oz{};
-    ox = p->X > x_0;
-    oy = p->Y > y_0;
-    oz = p->Z > z_0;
-    if (((ox * 4) + (oy * 2) + oz) == n) {
-        return true;
+void init_interaction_list(Field *f, Field *parent) {
+    if (f == nullptr) {
+        return;
     }
-    return false;
-}
-
-void field_initializer(Field* f) {
-    // partition field
-    for (auto &p : f->points) {
-        f->M_SUM += p.M;
-        f->M_X_SUM += p.M * p.X;
-        f->M_Y_SUM += p.M * p.Y;
-        f->M_Z_SUM += p.M * p.Z;
-    }
-    f->X_AVG = f->M_X_SUM / f->M_SUM; f->Y_AVG = f->M_Y_SUM / f->M_SUM; f->Z_AVG = f->M_Z_SUM / f->M_SUM;
-    if (f->points.size() > AlgorithmParams::D) {
-        for (int octet = 0; octet < 8; octet++) {
-            vector<Point> points = GetOctet(octet, f->X_AVG, f->Y_AVG, f->Z_AVG, f->points);
-            if (!points.empty()) {
-                f->child_fields[octet] = new Field;
-                f->child_fields[octet]->points = points;
-            }
-        }
-
-        for (auto & child_field : f->child_fields) {
-            if (child_field != nullptr) {
-                field_initializer(child_field);
+    if (parent != nullptr) {
+        int D = parent->r_x - parent->l_x;
+        int Dp = f->r_x - f->l_x;
+        for (int i = -1; i <= 1; i++) {
+            for (int j = -1; j <= 1; j++) {
+                double nl_x = parent->l_x + i * D;
+                double nr_x = parent->r_x + i * D;
+                double nl_y = parent->l_y + j * D;
+                double nr_y = parent->r_y + j * D;
+                auto par_neigh = mp[{{nl_x, nr_x},
+                                     {nl_y, nr_y}}];
+                if (par_neigh == nullptr) {
+                    continue;
+                }
+                for (auto f_neigh: par_neigh->child_fields) {
+                    if (f_neigh == nullptr) {
+                        continue;
+                    }
+                    int dx = abs(f_neigh->l_x - f->l_x);
+                    int dy = abs(f_neigh->l_y - f->l_y);
+                    if (dx >= 2 * Dp || dy >= 2 * Dp) {
+                        f->interaction_list.push_back(f_neigh);
+                    } else if (dx != 0 || dy != 0) {
+                        f->neighbours.push_back(f_neigh);
+                    }
+                }
             }
         }
     }
+    if (f->isLast()) {
+        return;
+    }
+    init_interaction_list(f->child_fields[0], f);
+    init_interaction_list(f->child_fields[1], f);
+    init_interaction_list(f->child_fields[2], f);
+    init_interaction_list(f->child_fields[3], f);
 }
 
-void calc_power_from_field_to_point(Field* f, Point *p) {
-    bool last_field = true;
-    for (int octet = 0; octet < 8; octet++) {
-        double DD = 0, r = 1e18;
-        if (f->child_fields[octet] != nullptr) {
-            DD = f->child_fields[octet]->get_size();
-            r = p->dist(f->child_fields[octet]->X_AVG, f->child_fields[octet]->Y_AVG, f->child_fields[octet]->Z_AVG);
+void init_B(Field* f) {
+    if (f == nullptr) {
+        return;
+    }
+    for (auto neigh: f->interaction_list) {
+        if (neigh == nullptr || neigh->field_points.empty()) {
+            continue;
         }
-        // cerr << DD / r << "\n";
-        if (!CheckInOctet(octet, f->X_AVG, f->Y_AVG, f->Z_AVG, p) && f->child_fields[octet] != nullptr && DD / r < 0.05) {
-
-            f->child_fields[octet]->AddPowerFromField(p);
-        } else if (f->child_fields[octet] != nullptr) {
-            last_field = false;
-            calc_power_from_field_to_point(f->child_fields[octet], p);
+        if (f->l_x == 0 && f->r_x == 2 && f->l_y == 0) {
+            cerr << "";
+        }
+        auto z_00 = f->z_0.z - neigh->z_0.z;
+        complex<double> delta = 0;
+        for (int k = 1; k < AlgorithmParams::p; k++) {
+            delta += neigh->A[k] / pow(z_00, k);
+            // f->B[0] += neigh->A[k] / pow(z_00, k);
+        }
+        delta += neigh->A[0] * log(z_00);
+        f->B[0] += delta;
+        //f->B[0] += neigh->A[0] * log(z_00);
+        for (int l = 1; l < AlgorithmParams::p; l++) {
+            delta = 0;
+            for (int k = 1; k < AlgorithmParams::p; k++) {
+                delta += neigh->A[k] / pow(z_00, k) * double(C(l + k - 1, k - 1));
+                // f->B[l] += neigh->A[k] / pow(z_00, k) * double(C(l + k - 1, k - 1));
+            }
+            delta /= pow(z_00, l) * pow(-1, l);
+            delta += neigh->A[0] / (double(l) * pow(z_00, l)) * pow(-1, l + 1);
+            f->B[l] += delta;
+            // f->B[l] /= pow(z_00, l); /// ???
+            // f->B[l] += neigh->A[0] / (double(l) * pow(z_00, l)) * pow(-1, l + 1);
         }
     }
-    if (last_field) {
-        for (auto& point: f->points) {
-            point.AddPowerFromPoint(p);
+
+    if (f->isLast() || f->field_points.empty()) {
+        return;
+    }
+
+    for (int l = 0; l < AlgorithmParams::p; l++) {
+        for (int k = l; k < AlgorithmParams::p; k++) {
+            f->child_fields[0]->B[l] += double(C(k, l)) * f->B[k] * pow(-(f->z_0.z - f->child_fields[0]->z_0.z), k - l);
+            f->child_fields[1]->B[l] += double(C(k, l)) * f->B[k] * pow(-(f->z_0.z - f->child_fields[1]->z_0.z), k - l);
+            f->child_fields[2]->B[l] += double(C(k, l)) * f->B[k] * pow(-(f->z_0.z - f->child_fields[2]->z_0.z), k - l);
+            f->child_fields[3]->B[l] += double(C(k, l)) * f->B[k] * pow(-(f->z_0.z - f->child_fields[3]->z_0.z), k - l);
         }
+    }
+    for (auto child: f->child_fields) {
+        init_B(child);
+    }
+}
+
+void init_field(Field* f, double l_x, double r_x, double l_y, double r_y) {
+    mp[{{l_x, r_x}, {l_y, r_y}}] = f;
+    f->l_x = l_x;
+    f->l_y = l_y;
+    f->r_x = r_x;
+    f->r_y = r_y;
+    f->child_fields = {new Field, new Field, new Field, new Field};
+
+    f->p_c = Point((r_x + l_x) / 2, (r_y + l_y) / 2, 0);
+    f->A.resize(AlgorithmParams::p);
+    f->B.resize(AlgorithmParams::p);
+
+    f->init_z_0_Q_A();
+
+    if (f->isLast()) {
+        return;
+    }
+
+    for (auto p: f->field_points) {
+        if (p.x() < f->p_c.x() && p.y() < f->p_c.y()) {
+            f->child_fields[0]->field_points.push_back(p);
+        } else if (p.x() >= f->p_c.x() && p.y() < f->p_c.y()) {
+            f->child_fields[1]->field_points.push_back(p);
+        } else if (p.x() < f->p_c.x() && p.y() >= f->p_c.y()) {
+            f->child_fields[2]->field_points.push_back(p);
+        } else {
+            f->child_fields[3]->field_points.push_back(p);
+        }
+    }
+    init_field(f->child_fields[0], l_x, f->p_c.x(), l_y, f->p_c.y());
+    init_field(f->child_fields[1], f->p_c.x(), r_x, l_y, f->p_c.y());
+    init_field(f->child_fields[2], l_x, f->p_c.x(), f->p_c.y(), r_y);
+    init_field(f->child_fields[3], f->p_c.x(), r_x, f->p_c.y(), r_y);
+}
+
+void calc_p(Field *f, Point *p) {
+    if (f->field_points.size() == 1 && f->isLast()) {
+        p->pot += p->q * f->B[0];
+        for (auto neigh: f->neighbours) {
+            if (neigh == nullptr) {
+                continue;
+            }
+            for (auto pn: neigh->field_points) {
+                p->pot += p->q * pn.q * log(p->z - pn.z);
+            }
+        }
+        return;
+    }
+    if (p->x() < f->p_c.x() && p->y() < f->p_c.y()) {
+        calc_p(f->child_fields[0], p);
+    } else if (p->x() >= f->p_c.x() && p->y() < f->p_c.y()) {
+        calc_p(f->child_fields[1], p);
+    } else if (p->x() < f->p_c.x() && p->y() >= f->p_c.y()) {
+        calc_p(f->child_fields[2], p);
+    } else {
+        calc_p(f->child_fields[3], p);
     }
 }
 
@@ -224,41 +252,35 @@ vector<Point> direct_calc_power(vector<Point> points) {
     vector<Point> updated_points;
     for (auto cur_p: points) {
         for (auto p: points) {
-            p.AddPowerFromPoint(&cur_p);
+            if (abs(cur_p.z - p.z) < AlgorithmParams::eps) {
+                continue;
+            }
+            cur_p.pot += cur_p.q * p.q * log(cur_p.z - p.z);
         }
-        cur_p.UpdatedPointState();
         updated_points.emplace_back(cur_p);
     }
     return updated_points;
 }
 
 void cerr_errors(vector<Point> correct, vector<Point> my_answer) {
-    double F_X_ERR{}, F_Y_ERR{}, F_Z_ERR{};
-    double F_ERR;
+    double F_ERR = 0;
     for (int i = 0; i < correct.size(); i++) {
-        double myF = sqrt(pow(my_answer[i].F_X, 2) + pow(my_answer[i].F_Y, 2) + pow(my_answer[i].F_Z, 2));
-        double correctF = sqrt(pow(correct[i].F_X, 2) + pow(correct[i].F_Y, 2) + pow(correct[i].F_Z, 2));
-        if (i < 100) {
-            cerr << myF << " " << correctF << "\n";
+        if (i < 50) {
+            cerr << correct[i].pot << " " << my_answer[i].pot << "\n";
         }
-        F_ERR += abs(myF - correctF) / abs(correctF);
-        F_X_ERR += abs(correct[i].F_X - my_answer[i].F_X) / abs(correct[i].F_X);
-        F_Y_ERR += abs(correct[i].F_Y - my_answer[i].F_Y) / abs(correct[i].F_Y);
-        F_Z_ERR += abs(correct[i].F_Z - my_answer[i].F_Z) / abs(correct[i].F_Z);
+        if (abs(correct[i].pot.real() - my_answer[i].pot.real()) > 0.05) {
+            cerr << i << "\n";
+            cerr << correct[i].pot.real() << " " << my_answer[i].pot.real() << " " << correct[i].pot.real() - my_answer[i].pot.real() << "\n";
+        }
+        F_ERR += abs(correct[i].pot.real() - my_answer[i].pot.real()) / abs(correct[i].pot.real());
     }
     F_ERR /= correct.size();
-    F_X_ERR /= correct.size();
-    F_Y_ERR /= correct.size();
-    F_Z_ERR /= correct.size();
 
     cerr << "F error = " << F_ERR * 100 << "%\n";
-    cerr << "F on OX error = " << F_X_ERR * 100 << "%\n";
-    cerr << "F on OY error = " << F_Y_ERR * 100 << "%\n";
-    cerr << "F on OZ error = " << F_Z_ERR * 100 << "%\n";
 }
 
 int main() {
-    freopen("C:\\Diplom\\input.txt", "r", stdin);
+    freopen("C:\\FMM\\input.txt", "r", stdin);
 
     int N;
     cin >> N;
@@ -267,39 +289,38 @@ int main() {
     vector<Point> points;
     for (int i = 0; i < N; ++i) {
         double m, v_x, v_y, v_z, x, y, z;
-        cin >> x >> y >> z >> m >> v_x >> v_y >> v_z;
-        f->points.emplace_back(x, y, z, m, v_x, v_y, v_z);
+        cin >> x >> y >> m;
+        f->field_points.emplace_back(x, y, m);
     }
-    points = f->points;
-    
-    
-    freopen("C:\\Diplom\\output.txt", "w", stdout);
+    points = f->field_points;
+
+
+    freopen("C:\\FMM\\output.txt", "w", stdout);
     std::chrono::steady_clock::time_point begin = std::chrono::steady_clock::now();
-    
-    field_initializer(f);
-    
+
+    init_field(f, AlgorithmParams::MIN_X, AlgorithmParams::MAX_X, AlgorithmParams::MIN_Y, AlgorithmParams::MAX_Y);
+    init_interaction_list(f, nullptr);
+    init_B(f);
+
     for (int i = 0; i < N; i++) {
-        calc_power_from_field_to_point(f, &points[i]);
-    }
-    
-    cout << N << '\n';
-    for (int i = 0; i < N; i++) {
-        points[i].UpdatedPointState();
-        cout << 
-        points[i].X << " " << 
-        points[i].Y << " " << 
-        points[i].Z << " " << 
-        points[i].M << " " << 
-        points[i].V_X << " " << 
-        points[i].V_Y << " " << 
-        points[i].V_Z << "\n";
+        calc_p(f, &points[i]);
     }
 
     std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now();
     std::cerr << "Execution Time = " << (std::chrono::duration_cast<std::chrono::microseconds>(end - begin).count()) / 1e6 << "[s]" << std::endl;
 
-    vector<Point> correct_points = direct_calc_power(f->points);
+    vector<Point> correct_points = direct_calc_power(f->field_points);
 
     cerr_errors(correct_points, points);
     return 0;
 }
+
+/*
+6
+0.5 0.5 1
+1.5 1.5 1
+-1.5 1.5 1
+-3.5 -2.5 1
+3.4 0.4 1
+-3.5 1.5 1
+ */
