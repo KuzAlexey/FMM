@@ -7,14 +7,14 @@ def generate_points_in_circle(n, radius):
         angle = random.uniform(0, 2*math.pi)
         bangle = random.uniform(0, 2*math.pi)
         d = random.uniform(0, radius)
-        x = (radius) * math.cos(angle) * math.cos(bangle)
-        y = (radius) * math.cos(angle) * math.sin(bangle)
+        x = (radius) * math.cos(angle)
+        y = (radius) * math.sin(angle)
         z = (radius) * math.sin(angle)
-        m = random.uniform(1, 100)
+        m = random.uniform(1, 1)
         v_x = 0
         v_y = 0
         v_z = 0
-        points.append((x, y, z, m, v_x, v_y, v_z))
+        points.append((x, y, m))
     return points
 
 def gggenerate_points_in_square(n):
@@ -37,11 +37,11 @@ def generate_points_in_square(n):
     for i in range(n):
         x = random.uniform(-10000, 10000)
         y = random.uniform(-10000, 10000)
-        m = random.uniform(1, 10000)  # generating random value for M
+        m = random.uniform(1, 100)  # generating random value for M
         points.append((x, y, m))
     return points
 
-n = 300
+n = 5000
 def write_points_to_file(points, filename):
     global n
     with open(filename, 'w') as file:
@@ -64,7 +64,7 @@ def my_write_points_to_file(points, filename):
 
 # Generate 10 points within a circle of radius 5
 radius = 500
-points = gggenerate_points_in_square(n)
+points = generate_points_in_square(n)
 # points = generate_points_in_square(n)
 
 # Write the points to a file
