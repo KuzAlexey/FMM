@@ -75,7 +75,8 @@ struct Field {
 
     complex<long double> DEBUG_calc_p_direct(long double x, long double y, long double q) {
         Point p(x, y, q);
-        for (auto point: points) {
+        for (int i = 0; i < points.size(); i++) {
+            Point point = points[i];
             p.pot += p.q * point.q * log(p.z - point.z);
         }
         return p.pot;
@@ -117,7 +118,8 @@ void init_KDTREE(Field* f) {
     }
 
     // init childs
-    for (auto point: f->points) {
+    for (int i = 0; i < f->points.size(); i++) {
+        Point point = f->points[i];
         int octet = point.get_octet(f->x_m, f->y_m);
         if (f->child_fields[octet] == nullptr) {
             f->child_fields[octet] = new Field;
@@ -147,7 +149,8 @@ void init_KDTREE(Field* f) {
 
 void init_near() {
     for (int level = 0; level < fields.size(); level++) {
-        for (auto f: fields[level]) {
+        for (int i = 0; i < fields[level].size(); i++) {
+            Field* f = fields[level][i];
             Field* parent = f->parent;
             if (parent == nullptr) {
                 continue;
@@ -162,7 +165,8 @@ void init_near() {
                     if (neigh_parent == nullptr) {
                         continue;
                     }
-                    for (auto neigh: neigh_parent->child_fields) {
+                    for (int i = 0; i < 4; i++) {
+                        Field* neigh = neigh_parent->child_fields[i];
                         if (neigh == nullptr || neigh == f) {
                             continue;
                         }
@@ -193,18 +197,21 @@ complex<long double> my_pow(complex<long double> z, int k) {
 
 void init_a() {
     for (int level = 0; level < fields.size(); level++) {
-        for (auto f: fields[level]) {
+        for (int i = 0; i < fields[level].size(); i++) {
+            Field* f = fields[level][i];
             f->A.resize(P);
 
             // init a
             f->A[0] = 0;
-            for (auto point: f->points) {
+            for (int i = 0; i < f->points.size(); i++) {
+                Point point = f->points[i];
                 f->A[0] += point.q;
             }
             complex<long double> z_0(f->x_m, f->y_m);
             for (int k = 1; k < P; k++) {
                 f->A[k] = 0;
-                for (auto point: f->points) {
+                for (int i = 0; i < f->points.size(); i++) {
+                    Point point = f->points[i];
                     f->A[k] += -point.q * my_pow(point.z - z_0, k) / ((long double) k);
                 }
             }
@@ -227,11 +234,12 @@ long double C(int n, int k) {
 
 void init_b() {
     for (int level = 0; level < fields.size(); level++) {
-        for (auto f: fields[level]) {
-
+        for (int i = 0; i < fields[level].size(); i++) {
+            Field* f = fields[level][i];
             // interaction_list A -> B
             complex<long double> delta = 0, z_0(f->x_m, f->y_m);
-            for (auto near: f->interaction_list) {
+            for (int i = 0; i < f->interaction_list.size();i++) {
+                Field *near = f->interaction_list[i];
                 complex<long double> z_n(near->x_m, near->y_m);
                 complex<long double> z_0_z_n_l(1, 0);
                 for (int l = 0; l < P; l++) {
@@ -258,7 +266,8 @@ void init_b() {
             }
 
             // B -> B to childs
-            for (auto child: f->child_fields) {
+            for (int i = 0; i < 4; i++) {
+                Field* child = f->child_fields[i];
                 if (child == nullptr) {
                     continue;
                 }
@@ -294,29 +303,31 @@ void cacl_pf(Field *f, Point *p) {
                 fff += abs(ff);
             }
         }
-        for (auto neigh: f->neighbours) {
+        for (int i = 0; i < f->neighbours.size(); i++) {
+            Field* neigh = f->neighbours[i];
             if (neigh == nullptr) {
                 continue;
             }
-            for (auto pn: neigh->points) {
+            for (int i = 0; i < neigh->points.size();i++) {
+                Point pn = neigh->points[i];
                 if (abs(p->z - pn.z) < EPS) {
                     continue;
                 }
                 p->pot += p->q * pn.q * log(p->z - pn.z);
 
-                auto r2 = pow(abs(p->z - pn.z),2);
+                long double r2 = pow(abs(p->z - pn.z),2);
                 complex<long double> v(p->z.real() - pn.z.real(), p->z.imag() - pn.z.imag());
                 p->F += p->q * pn.q * v / r2;
             }
         }
-        for (auto inp: f->points) {
+        for (int i = 0; i < f->points.size(); i++) {
+            Point inp = f->points[i];
             if (abs(p->z - inp.z) < EPS) {
                 continue;
             }
             p->pot += p->q * inp.q * log(p->z - inp.z);
 
-            auto r2 = pow(abs(p->z - inp.z),2);
-            auto r3 = pow(abs(p->z - inp.z),3);
+            long double r2 = pow(abs(p->z - inp.z),2);
             complex<long double> v(p->z.real() - inp.z.real(), p->z.imag() - inp.z.imag());
             p->F += p->q * inp.q * v / r2;
         }
@@ -327,14 +338,16 @@ void cacl_pf(Field *f, Point *p) {
 
 vector<Point> direct_calc_pf(vector<Point> points) {
     vector<Point> updated_points;
-    for (auto cur_p: points) {
-        for (auto p: points) {
+    for (int i = 0; i < points.size(); i++) {
+        Point cur_p = points[i];
+        for (int i = 0; i < points.size();i++) {
+            Point p = points[i];
             if (abs(cur_p.z - p.z) < EPS) {
                 continue;
             }
             cur_p.pot += cur_p.q * p.q * log(cur_p.z - p.z);
 
-            auto r2 = pow(abs(cur_p.z - p.z),2);
+            long double r2 = pow(abs(cur_p.z - p.z),2);
             complex<long double> v(cur_p.z.real() - p.z.real(), cur_p.z.imag() - p.z.imag());
             cur_p.F += cur_p.q * p.q * v / r2;
         }
